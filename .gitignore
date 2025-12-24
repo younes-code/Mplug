@@ -1,0 +1,52 @@
+cat <<EOL > .gitignore
+# Python caches and bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Data and output files
+*.npz
+*.jpg
+*.png
+*.mp4
+
+# Directories (add more if needed for your other codebases)
+embeddings/
+similarities/
+temporal_selection/
+resampled_ucf_captions/
+test_video/
+test_video-frames/
+evaluate/
+train/
+model/  # Assuming this has large models; remove if it's code-only
+offload/
+serve/
+local_serve/
+~/
+
+# Env and temp files
+.env
+*.swp
+.DS_Store
+
+# Large or unnecessary
+UBnormal_*
+XD_Violance_*
+best_*
+captions_*
+check_*
+concatenated_*
+frame_*
+generate_*
+global_*
+half_*
+inactive_*
+small_*
+syn_*
+temp_*
+test_*
+three_frames_*
+ucf_*
+EOL

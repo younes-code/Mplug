@@ -1,3 +1,5 @@
+
+# import os
 # import torch
 # from PIL import Image
 # from transformers import AutoTokenizer, TextStreamer
@@ -5,196 +7,182 @@
 # from conversation import conv_templates
 # from model.builder import load_pretrained_model
 # from mm_utils import process_images, tokenizer_image_token, get_model_name_from_path, KeywordsStoppingCriteria
-# import os
 # import re
+# import gc
+# import time
 
 # def extract_frame_number(filename):
 #     """
 #     Extracts the numerical part from a filename.
-
-#     Args:
-#         filename (str): The input filename.
-
-#     Returns:
-#         int: Extracted numerical part or float('inf') if not found.
 #     """
-#     # Extract numerical part from the filename
 #     match = re.search(r'\d+', filename)
 #     return int(match.group()) if match else float('inf')
 
+# def resize_image(image, max_size=1024):
+#     """
+#     Resize image to ensure it fits into GPU memory more easily.
+#     """
+#     max_edge = max(image.size)
+#     if max_edge > max_size:
+#         ratio = max_size / float(max_edge)
+#         new_size = tuple([int(dim * ratio) for dim in image.size])
+#         image = image.resize(new_size)
+#     return image
 
 # def generate_caption(model, tokenizer, image_processor, img_path):
 #     """
 #     Generates a caption for the given image using the provided model and tokenizer.
-
-#     Args:
-#         model: The MPLUG model for caption generation.
-#         tokenizer: The tokenizer corresponding to the MPLUG model.
-#         image_processor: The image processor used for image preprocessing.
-#         img_path (str): The path to the input image.
-
-#     Returns:
-#         str: The generated caption in the format "directory/image_name ## generated_text".
 #     """
-#     # Extract the image directory, name, and timestamp
 #     img_dir = os.path.basename(os.path.dirname(img_path))
 #     img_name = os.path.basename(img_path)
-#     timestamp = img_name.split()[1]  # Assuming the timestamp is separated by space in the filename
 
-#     # Load image
+#     # Open and resize image to optimize memory usage
 #     image = Image.open(img_path).convert('RGB')
-#     max_edge = max(image.size)
-#     image = image.resize((max_edge, max_edge))
-    
-#     # Preprocess image
+#     image = resize_image(image)
+
+#     # Preprocess image and move to GPU
 #     image_tensor = process_images([image], image_processor)
 #     image_tensor = image_tensor.to(model.device, dtype=torch.float16)
 
-#     # Create conversation context
+#     # Prepare prompt and input tokens
 #     conv = conv_templates["mplug_owl2"].copy()
 #     inp = DEFAULT_IMAGE_TOKEN
 #     conv.append_message(conv.roles[0], inp)
 #     conv.append_message(conv.roles[1], None)
 #     prompt = conv.get_prompt()
 #     input_ids = tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt').unsqueeze(0).to(model.device)
-    
-#     # Define stopping criteria
+
 #     stop_str = conv.sep2
 #     keywords = [stop_str]
 #     stopping_criteria = KeywordsStoppingCriteria(keywords, tokenizer, input_ids)
-#     streamer = TextStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
 
-#     # Generate caption
-#     with torch.inference_mode():
+#     with torch.no_grad():
+#         # Generate caption
 #         output_ids = model.generate(
 #             input_ids,
 #             images=image_tensor,
 #             do_sample=True,
 #             temperature=0.7,
 #             max_new_tokens=512,
-#             streamer=streamer,
 #             use_cache=True,
-#             stopping_criteria=[stopping_criteria]
+#             stopping_criteria=[stopping_criteria],
 #         )
 
 #     generated_text = tokenizer.decode(output_ids[0, input_ids.shape[1]:]).strip()
-    
-#     # Combine directory, image name, timestamp, and generated text
-#     caption = f"{img_name} ## {generated_text}\n"
+#     caption = f"{img_dir}/{img_name} ## {generated_text}\n"
+
+#     # Cleanup
+#     del image_tensor, input_ids, output_ids
+#     torch.cuda.empty_cache()
+#     gc.collect()
+
 #     return caption
 
-
-# # def main(ucf_path, save_path, skip_frames=90):
-# #     """
-# #     Main function to process frames, generate captions, and save them to a text file.
-
-# #     Args:
-# #         ucf_path (str): The path to the UCF dataset directory.
-# #         save_path (str): The path to the output captions text file.
-# #         skip_frames (int): Number of frames to skip between generating captions (90 by default).
-
-# #     Returns:
-# #         None
-# #     """
-# #     # Load the MPLUG model and tokenizer
-# #     model_path = 'MAGAer13/mplug-owl2-llama2-7b'
-# #     model_name = get_model_name_from_path(model_path)
-# #     tokenizer, model, image_processor, _ = load_pretrained_model(
-# #         model_path, None, model_name, load_4bit=False, device="cuda", offload_folder="offload"
-# #     )
-# #     # Loop through all subdirectories in the UCF directory
-# #     for root, dirs, files in os.walk(ucf_path):
-# #         # Sort the files based on extracted numerical parts
-# #         files.sort(key=extract_frame_number)
-
-# #         frame_count = 0
-# #         generate_caption_flag = True
-
-# #         for file in files:
-# #             if file.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp')):
-# #                 img_path = os.path.join(root, file)
-
-# #                 if generate_caption_flag:
-# #                     # Generate caption for the current image
-# #                     caption = generate_caption(model, tokenizer, image_processor, img_path)
-
-# #                     # Save the caption to a text file
-# #                     with open(save_path, 'a') as file:
-# #                         file.write(caption)
-
-# #                     generate_caption_flag = False
-
-# #                 # Increment the frame counter
-# #                 frame_count += 1
-
-# #                 # If the specified number of frames have been processed, reset the counter
-# #                 if frame_count >= skip_frames:
-# #                     frame_count = 0
-# #                     generate_caption_flag = True
-
-# # if __name__ == "__main__":
-# #     ucf_directory = '../Datasets/XD-Violance/XD_Violance_frames/'
-# #     captions_save_path = 'XD_Violance_captions.txt'
-
-#     main(ucf_directory, captions_save_path)
-# def main(image_dir, save_path):
+# def main(ucf_path, save_path, skip_frames=30, max_frames=float("inf")):
 #     """
-#     Main function to generate captions for images in a local directory.
+#     Main function to process a sample of frames, generate captions, and calculate average processing time.
 
 #     Args:
-#         image_dir (str): The path to the local image directory.
-#         save_path (str): The path to the output captions text file.
-
-#     Returns:
-#         None
+#         ucf_path (str): Path to the directory containing frame images.
+#         save_path (str): Path to save the generated captions.
+#         skip_frames (int): Number of frames to skip between processed frames (sampling rate).
+#         max_frames (int): Maximum number of frames to process for timing estimation.
 #     """
-#     # Load the MPLUG model and tokenizer
 #     model_path = 'MAGAer13/mplug-owl2-llama2-7b'
 #     model_name = get_model_name_from_path(model_path)
 #     tokenizer, model, image_processor, _ = load_pretrained_model(
 #         model_path, None, model_name, load_4bit=False, device="cuda", offload_folder="offload"
 #     )
 
-#     # Loop through all image files in the directory
-#     for file in os.listdir(image_dir):
-#         if file.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp')):
-#             img_path = os.path.join(image_dir, file)
+#     # Initialize timing and frame counter
+#     start_time = time.time()  # Start timing for caption generation
+#     processed_frames = 0  # Count frames actually processed
 
-#             # Generate caption for the current image
-#             caption = generate_caption(model, tokenizer, image_processor, img_path)
+#     for root, dirs, files in os.walk(ucf_path):
+#         files.sort(key=extract_frame_number)
+#         frame_count = 0
 
-#             # Save the caption to a text file
-#             with open(save_path, 'a') as f:
-#                 f.write(f"{file} ## {caption}\n")
+#         for file in files:
+#             if file.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp')):
+#                 img_path = os.path.join(root, file)
+
+#                 # Process frame if it’s the selected one based on skip_frames
+#                 if frame_count % skip_frames == 0:
+#                     try:
+#                         print(f"Processing image: {img_path}")
+#                         caption = generate_caption(model, tokenizer, image_processor, img_path)
+
+#                         # Save the caption to a text file
+#                         with open(save_path, 'a') as f:
+#                             f.write(caption)
+#                         print(f"Caption saved: {caption.strip()}")
+
+#                         processed_frames += 1  # Increment frame counter
+
+#                         # Clear memory
+#                         torch.cuda.empty_cache()
+#                         gc.collect()
+
+#                     except Exception as e:
+#                         print(f"Error processing image {img_path}: {e}")
+#                         continue
+
+#                     # Stop after processing max_frames
+#                     if processed_frames >= max_frames:
+#                         break
+
+#                 frame_count += 1
+
+#         # Break outer loop if max_frames reached
+#         if processed_frames >= max_frames:
+#             break
+
+#     # Calculate and print timing results
+#     caption_time = time.time() - start_time  # End timing
+#     print(f"Caption generation time for {processed_frames} frames: {caption_time:.2f} seconds")
+#     if processed_frames > 0:
+#         avg_time_per_frame = caption_time / processed_frames
+#         print(f"Average time per frame: {avg_time_per_frame:.2f} seconds")
+#     else:
+#         print("No frames processed.")
+
+#     # Final cleanup
+#     torch.cuda.empty_cache()
+#     gc.collect()
+#     print("Processing complete.")
 
 # if __name__ == "__main__":
-#     image_directory = '1.png'
-#     captions_save_path = 'single_captions.txt'
+#     ucf_directory = 'test_video-frames'
+#     for skip_frames, save_path in [
+#         (3, 'test_video_captions_3.txt'),
+#         (5, 'test_video_captions_5.txt'),
+#         (7, 'test_video_captions_7.txt')
+#     ]:
+#         print(f"\nRunning with skip_frames={skip_frames}")
+#         main(ucf_directory, save_path, skip_frames, max_frames=10)
 
-#     main(image_directory, captions_save_path)
+########################################## temporal selection #############################################
 
 import os
 import torch
 from PIL import Image
-from transformers import AutoTokenizer, TextStreamer
+from transformers import AutoTokenizer
 from constants import IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN
 from conversation import conv_templates
 from model.builder import load_pretrained_model
 from mm_utils import process_images, tokenizer_image_token, get_model_name_from_path, KeywordsStoppingCriteria
 import re
 import gc
+import time
 
+# ---------------------------
+# Utility functions
+# ---------------------------
 def extract_frame_number(filename):
-    """
-    Extracts the numerical part from a filename.
-    """
     match = re.search(r'\d+', filename)
     return int(match.group()) if match else float('inf')
 
 def resize_image(image, max_size=1024):
-    """
-    Resize image to ensure it fits into GPU memory more easily.
-    """
     max_edge = max(image.size)
     if max_edge > max_size:
         ratio = max_size / float(max_edge)
@@ -203,21 +191,15 @@ def resize_image(image, max_size=1024):
     return image
 
 def generate_caption(model, tokenizer, image_processor, img_path):
-    """
-    Generates a caption for the given image using the provided model and tokenizer.
-    """
     img_dir = os.path.basename(os.path.dirname(img_path))
     img_name = os.path.basename(img_path)
 
-    # Open and resize image to optimize memory usage
     image = Image.open(img_path).convert('RGB')
     image = resize_image(image)
 
-    # Preprocess image and move to GPU
     image_tensor = process_images([image], image_processor)
     image_tensor = image_tensor.to(model.device, dtype=torch.float16)
 
-    # Prepare prompt and input tokens
     conv = conv_templates["mplug_owl2"].copy()
     inp = DEFAULT_IMAGE_TOKEN
     conv.append_message(conv.roles[0], inp)
@@ -230,7 +212,6 @@ def generate_caption(model, tokenizer, image_processor, img_path):
     stopping_criteria = KeywordsStoppingCriteria(keywords, tokenizer, input_ids)
 
     with torch.no_grad():
-        # Generate caption
         output_ids = model.generate(
             input_ids,
             images=image_tensor,
@@ -244,96 +225,88 @@ def generate_caption(model, tokenizer, image_processor, img_path):
     generated_text = tokenizer.decode(output_ids[0, input_ids.shape[1]:]).strip()
     caption = f"{img_dir}/{img_name} ## {generated_text}\n"
 
-    # Cleanup
     del image_tensor, input_ids, output_ids
     torch.cuda.empty_cache()
     gc.collect()
 
     return caption
 
-
-def get_last_processed_image(save_path):
-    """
-    Read the last processed caption from the output file.
-    """
+# ---------------------------
+# Resume mechanism
+# ---------------------------
+def load_done_images(save_path):
+    done = set()
     if os.path.exists(save_path):
         with open(save_path, 'r') as f:
-            lines = f.readlines()
-            if lines:
-                last_line = lines[-1]
-                last_image_name = last_line.split(" ##")[0]
-                return last_image_name
-    return None
+            for line in f:
+                if "##" in line:
+                    img = line.split("##")[0].strip()  # ex: RoadAccidents/...jpg
+                    done.add(img)
+    return done
 
+# ---------------------------
+# Main processing
+# ---------------------------
+def main(ucf_path, save_path, skip_frames=1):
+    # Ensure output folder exists
+    output_folder = 'temporal_selection'
+    os.makedirs(output_folder, exist_ok=True)
+    save_path = os.path.join(output_folder, save_path)
 
-def main(ucf_path, save_path, skip_frames=90):
-    """
-    Main function to process frames, generate captions, and save them to a text file.
-    """
+    start_time = time.time()
+    processed_frames = 0
+
     model_path = 'MAGAer13/mplug-owl2-llama2-7b'
     model_name = get_model_name_from_path(model_path)
     tokenizer, model, image_processor, _ = load_pretrained_model(
         model_path, None, model_name, load_4bit=False, device="cuda", offload_folder="offload"
     )
 
-    # Get the last processed image to continue from
-    last_processed_image = get_last_processed_image(save_path)
-    print(f"Last processed image: {last_processed_image}")  # Debug print
-
-    start_processing = False
+    done_images = load_done_images(save_path)
 
     for root, dirs, files in os.walk(ucf_path):
         files.sort(key=extract_frame_number)
-
         frame_count = 0
-        generate_caption_flag = True
 
         for file in files:
             if file.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp')):
                 img_path = os.path.join(root, file)
-                print(f"Current image path: {img_path}")  # Debug print
+                relative_name = os.path.basename(root) + "/" + file
 
-                # Skip images before the last processed one
-                if last_processed_image and not start_processing:
-                    if img_path == last_processed_image:
-                        start_processing = True
-                        print(f"Found last processed image. Resuming processing from: {img_path}")  # Debug print
-                    else:
-                        print(f"Skipping image: {img_path}")  # Debug print
-                        continue  # Skip image
+                # --- RESUME CHECK ---
+                if relative_name in done_images:
+                    continue
 
-                if start_processing:
+                if frame_count % skip_frames == 0:
                     try:
-                        print(f"Processing image: {img_path}")  # Debug print
+                        print(f"Processing image: {img_path}")
                         caption = generate_caption(model, tokenizer, image_processor, img_path)
-
-                        # Save the caption to a text file
                         with open(save_path, 'a') as f:
                             f.write(caption)
-                        print(f"Caption saved: {caption.strip()}")  # Debug print
-
-                        generate_caption_flag = False
-
-                        # Clear memory
-                        torch.cuda.empty_cache()
-                        gc.collect()
+                        processed_frames += 1
                     except Exception as e:
-                        print(f"Error processing image {img_path}: {e}")
-                        continue
-
+                        print(f"Error processing {img_path}: {e}")
                 frame_count += 1
 
-                if frame_count >= skip_frames:
-                    frame_count = 0
-                    generate_caption_flag = True
+    total_time = time.time() - start_time
+    avg_time = total_time / processed_frames if processed_frames else 0
+    log_msg = f"Processed {processed_frames} frames with skip_frames={skip_frames}\n" \
+              f"Total time: {total_time:.2f}s, Avg per frame: {avg_time:.2f}s\n"
 
-    # Final cleanup after all images are processed
+    print(log_msg)
+    # Save timing log in temporal_selection folder
+    log_file_path = os.path.join(output_folder, "caption_time_log.txt")
+    with open(log_file_path, 'a') as log_file:
+        log_file.write(log_msg)
+
     torch.cuda.empty_cache()
     gc.collect()
-    print("Processing complete.")  # Debug print
+    print("Processing complete.")
 
-
+# ---------------------------
+# Entry point
+# ---------------------------
 if __name__ == "__main__":
-    ucf_directory = '../Datasets/XD-Violance/XD_Violance_frames/'
-    captions_save_path = 'XD_Violance_captions.txt'
-    main(ucf_directory, captions_save_path)
+    ucf_directory = '../Datasets/active_frames_output'
+    save_filename = 'captions_all.txt'
+    main(ucf_directory, save_filename, skip_frames=1)

@@ -54,7 +54,7 @@ if __name__ == "__main__":
             continue
 
         os.makedirs(sequence_path, exist_ok=True)
-
+        start_time = time.time()  # Start timing
         # Extract frames
         for j, frame in enumerate(
             tqdm.tqdm(
@@ -63,7 +63,8 @@ if __name__ == "__main__":
             )
         ):
             frame.save(os.path.join(sequence_path, f"{j}.jpg"))
-
+        frame_extraction_time = time.time() - start_time  # End timing
+        print(f"Frame extraction time for {sequence_name}: {frame_extraction_time:.2f} seconds")
         # Determine approximate time left
         videos_left = len(video_paths) - (i + 1)
         time_left = datetime.timedelta(seconds=videos_left * (time.time() - prev_time))
